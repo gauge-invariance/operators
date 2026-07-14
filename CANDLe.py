@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import threading
 from matplotlib.gridspec import GridSpecFromSubplotSpec
 import time
+from collections import defaultdict
 
 class CryptoChartApp:
     def __init__(self, root):
@@ -173,9 +174,16 @@ class CryptoChartApp:
                 return None, None
 
             # 计算MACD
-            print(params)
             macd_values = self.calc_MACD(data, 12, 26, 9)
             macdx = macd_values[limit:limit*2] if len(macd_values) >= limit*2 else macd_values[-limit:]
+
+            segp,segn = extract_envl(data[limit:2*limit], macdx)
+            infos = self.check_deviation(params,segp, segn)
+            #print([round(x,1) for x in macdx])
+            #for i in segp:
+             #   print([round(y[0],0) for y in i])
+            #for i in segn :
+             #   print([round(y[0],0) for y in i])
 
             # 解析数据
             ohlcv = []
@@ -192,12 +200,12 @@ class CryptoChartApp:
             df = pd.DataFrame(ohlcv)
             df.set_index('time', inplace=True)
             
-            return df, macdx
+            return df, macdx, infos
             
         except Exception as e:
             print(f"获取数据失败 {symbol} {timeframe}分钟: {e}")
             return None, None
-        
+
     def calc_MACD(self, data, fast, slow, window):
 
         cvals = []
@@ -236,8 +244,8 @@ class CryptoChartApp:
                 dea.append(float(0.0))
 
             macd.append(1.0*(dif[-1]-dea[-1]))
-            if(idx>= len(data)-10):
-                print(round(macd[-1],1), round(ema_fast[-1],1) ,round(ema_slow[-1],1))
+            #if(idx>= len(data)-10):
+            #   print(round(macd[-1],1), round(ema_fast[-1],1) ,round(ema_slow[-1],1))
         return macd
 
     def load_all_data(self):
@@ -251,9 +259,12 @@ class CryptoChartApp:
         
         def load_thread():
             try:
+                infos  = []
                 for symbol in self.symbols:
                     for tf in self.timeframes:
-                        df, macd = self.fetch_ohlcv(symbol, tf)
+                        df, macd, info= self.fetch_ohlcv(symbol, tf)
+                        for x in info:
+                            infos.append(x)
                         if df is not None and not df.empty:
                             self.data[symbol][tf] = df
                             self.macd_data[symbol][tf] = macd
@@ -262,7 +273,21 @@ class CryptoChartApp:
                             self.data[symbol][tf] = self.generate_mock_data(tf)
                             self.macd_data[symbol][tf] = [0] * len(self.data[symbol][tf])
                         self.root.after(10, lambda: None)
-                
+
+                groups = defaultdict(list)
+                mapping = {1: "顶背离",-1: "底背离"}
+                cmapping = {1:Colors.GREEN,-1:Colors.CYAN}
+                labels = ['BTCUSDT','ETHUSDT','XAUUSDT']
+                for x in infos:
+                    groups[x[0]].append(x)
+
+                for l in labels:
+                    y = groups[l]
+                    if len(y)> 0 :
+                        print(f"{Colors.YELLOW}{l}{Colors.RESET}")
+                    for x in y:
+                         print(f"{cmapping[x[6]]}[{x[1]:<3}]  [{x[2]} {x[3]}]->[{x[4]} {x[5]}] [{mapping[x[6]]}]{Colors.RESET}")
+
                 self.root.after(0, self.update_charts)
                 self.root.after(0, lambda: self.status_label.config(text="数据已加载"))
                 
@@ -429,6 +454,96 @@ class CryptoChartApp:
     def refresh_data(self):
         """刷新数据"""
         self.load_all_data()
+
+    def check_deviation(self,params,segp,segn):
+        vp = []
+        vn = []
+        #print(f"segP={len(segp)} segn = {len(segn)}")
+        #tuple 的结构 (包络macd峰值，包络中某些最高价格平均，包络macd长度， 包络起始时间戳，终止时间戳)
+        for x in segp:
+            highest_prices = [float(y[1][2]) for y in x]
+            highest_prices = sorted(highest_prices,reverse=True)
+            highest_prices = highest_prices[0:2]
+            high_price_avg = sum(highest_prices)/len(highest_prices)
+            macd_peak = max([abs(y[0]) for y in x])
+            macd_lens  = len(x)
+            start_time = str(datetime.fromtimestamp(x[0][1][0]/1000))
+            end_time = str(datetime.fromtimestamp(x[-1][1][0]/1000))
+            vp.append((macd_peak,high_price_avg,macd_lens, start_time,end_time))
+        for xx in segn:
+            lowest_prices = [float(y[1][3]) for y in xx]
+            lowest_prices = sorted(lowest_prices, reverse=False)
+            lowest_prices = lowest_prices[0:2]
+            low_price_avg = sum(lowest_prices)/len(lowest_prices)
+            macd_peak = max([abs(y[0]) for y in xx])
+            macd_lens = len(xx)
+            start_time =str(datetime.fromtimestamp(xx[0][1][0]/1000))
+            end_time = str(datetime.fromtimestamp(xx[-1][1][0]/1000))
+            vn.append((macd_peak,low_price_avg,macd_lens,start_time,end_time))
+
+        tuple_infos =[]
+
+        if len(vp)  > 1:
+            pointer = -1
+            for i in range(0,len(vp)-1):
+                if vp[i][0] > vp[i+1][0] and vp[i][1]<vp[i+1][1] and vp[i][2] > vp[i+1][2]:
+                    pointer = i
+            if pointer >= 0:
+                #记录最后一次出现背离的序列位置
+                i = pointer
+                tuple_info = (params['symbol'],params['interval'],vp[i][3],vp[i][4],vp[i+1][3],vp[i+1][4],1)
+                tuple_infos.append(tuple_info)
+                #print(f"顶背离 {vp[i][3]}->{vp[i+1][3]}")
+        if len(vn) > 1:
+            pointer = -1
+            for j in range(0,len(vn)-1):
+                if vn[j][0] > vn[j+1][0] and vn[j][1] > vn[j+1][1] and vn[j][2] + 1 >= vn[j+1][2]:
+                    pointer = j
+            if pointer >= 0:
+                #记录最后一次出现背离的序列位置
+                i = pointer
+                tuple_info = (params['symbol'],params['interval'],vn[i][3],vn[i][4],vn[i+1][3],vn[i+1][4],-1)
+                tuple_infos.append(tuple_info)
+                #print(f"底背离 {vn[j][3]}->{vn[j+1][3]}")
+
+        return tuple_infos
+    
+class Colors:
+    YELLOW = '\033[33m'
+    CYAN = '\033[36m'
+    RESET = '\033[0m'
+    GREEN = '\033[32m'
+
+
+def extract_envl(data, macd):
+
+        segp = [] #所有连续正数macd序列的集合
+        segn = [] #所有连续负数macd的序列的集合
+
+        temp  = [(macd[0], data[0])]
+
+        for id in range(1,len(macd)):
+            if macd[id] * temp[-1][0]< 0:
+                #macd开始变号
+                if len(temp)>=5:
+                    if temp[-1][0]<0:
+                        segn.append(temp)
+                    else:
+                        segp.append(temp)
+                    temp  = [(macd[id], data[id])]
+                else:
+                    #序列太短，放弃这个序列，用新的macd作为新的序列的第一个元素
+                    temp  = [(macd[id], data[id])]
+            else:
+                #macd连续保持同号
+                temp.append((macd[id], data[id]))
+                if id == len(macd)-1 and len(temp) >=5:
+                    if macd[id] > 0:
+                        segp.append(temp)
+                    else:
+                        segn.append(temp)
+
+        return segp, segn
 
 def main():
     root = tk.Tk()

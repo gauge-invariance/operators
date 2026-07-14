@@ -1,17 +1,18 @@
 import random
+import os
 import numpy as np
 import re
 
 class Colors:
     GREEN = '\033[32m'
     RED = '\033[31m'
-    BLUE = '\033[34m'
+    BLUE = '\033[35m'
     CYAN = '\033[36m'
     RESET = '\033[0m'
 
 class Critical:
     def __init__(self, macd0, macd1, ema12, ema26, extreme2, L2, M2, extreme3,action):
-        self.action = action #名称
+        self.action = action #动作名称
         self.macd0 = macd0 #临界位置的macd
         self.macd1 = macd1 #翻转后的初始macd序列
         self.ema12 = ema12 #临界处的ema12快线
@@ -21,7 +22,7 @@ class Critical:
         self.L2 = L2 ##第二次背离的macd序列长度
         self.M2 = M2 ##第二次背离的macd序列深度
 
-    def to_line(self):
+    def object_to_line(self):
         macd1_str = str([round(x, 2) for x in self.macd1])
         return (f"{self.action}\n"
                 f"macd0 = {self.macd0:.2f}\n"
@@ -60,7 +61,7 @@ class Critical:
         #lbb  = (lbl + lbu)/2
         lbb = sum(lbs)/len(lbs)
         action = (self.action).replace("#","").replace(" ","")
-        print(  f"{action:<16} " 
+        print(  f"{Colors.BLUE}{action:<16}{Colors.RESET} " 
                 f"{Colors.GREEN}vertx>{Colors.RESET} "
                 f"{self.extreme2:<8.1f} {self.extreme3:<8.1f} "
                 f"{Colors.GREEN}intrvl>{Colors.RESET} ({lbl:<8.1f} {lbb:<8.1f} {lbu:<8.1f})", 
@@ -259,9 +260,11 @@ def consol():
         return
     elif(str == "go"):
         #直接测试一组内置数据
-        v,s = task([8],[4,5],4738.72,4722.74,-3.51,[],False)
-        rr = [x+y for x,y in zip(v,s)]
-        print([round(x,1) for x in rr])
+        v,s = task([7,8,9,10],[-6,-7,-8],4098.82,4139.01,3.58,[],False)
+        rr = [x-y for x,y in zip(v,s)]
+        res = [round(x,1) for x in rr]
+        bound = (min(res),(min(res)+max(res))/2,max(res))
+        print(bound)
         return
     else:
         #输入一组数据测试
@@ -269,7 +272,8 @@ def consol():
         return
 
 def  benchmarking():
-    criticals = parse_benchmark('C:/Users/lambd/Desktop/重拳出击/benchmark.txt')
+    cur_dir = os.getcwd()
+    criticals = parse_benchmark(f'{cur_dir}\\benchmark.txt')
     for c in criticals:
         c.do_benchmark(False)
     return
@@ -286,9 +290,9 @@ def do_parsing():
 def write_back_sorted(criticals):
     criticals1 = sorted(criticals, key = lambda x : re.sub(r'\D', '', x.action),reverse=True)
 
-    with open('C:/Users/lambd/Desktop/重拳出击/benchmark.txt', 'w', encoding='utf-8') as f:
+    with open(f'{os.getcwd()}\\benchmark.txt', 'w', encoding='utf-8') as f:
         for c in criticals1:
-            f.write(c.to_line() + '\n')
+            f.write(c.object_to_line() + '\n')
             
 if __name__ == "__main__":
     main()
